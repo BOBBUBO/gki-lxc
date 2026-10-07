@@ -52,35 +52,28 @@ jobs:
             bison flex libelf-dev bc cpio rsync \
             python3 python3-pip python3-setuptools \
             device-tree-compiler lz4 lzop \
-            ccache pigz qemu-user-static
+            ccache pigz qemu-user-static \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            libc6-dev-arm64-cross libc6-dev-armhf-cross
 
-      - name: Set up toolchain
+      - name: Set up toolchain (Android NDK)
         run: |
-          sudo apt-get install -y git-lfs
-          git lfs install
-
-          mkdir -p toolchain
-          cd toolchain
-
-          if [[ ! -d "aarch64-linux-android-4.9" ]]; then
-            git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
-            cd aarch64-linux-android-4.9
-            git lfs pull
-            cd ..
-          fi
-
-          if [[ ! -d "arm-linux-androideabi-4.9" ]]; then
-            git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9
-            cd arm-linux-androideabi-4.9
-            git lfs pull
-            cd ..
-          fi
-
-          # Verify toolchain binaries exist
-          ls -la aarch64-linux-android-4.9/bin/
-          ls -la arm-linux-androideabi-4.9/bin/
-
-          echo "TOOLCHAIN_PATH=$PWD/aarch64-linux-android-4.9/bin:$PWD/arm-linux-androideabi-4.9/bin" >> $GITHUB_ENV
+          # Download and install Android NDK
+          NDK_VERSION="r25c"
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+          
+          echo "Downloading Android NDK ${NDK_VERSION}..."
+          wget -q -O /tmp/ndk.zip "$NDK_URL"
+          unzip -q /tmp/ndk.zip -d /tmp/
+          mv /tmp/android-ndk-${NDK_VERSION} /tmp/ndk
+          
+          # Set up toolchain paths for clang
+          export NDK_ROOT=/tmp/ndk
+          export CLANG_PATH=$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
+          
+          echo "NDK_ROOT=$NDK_ROOT" >> $GITHUB_ENV
+          echo "CLANG_PATH=$CLANG_PATH" >> $GITHUB_ENV
+          echo "PATH=$CLANG_PATH:$PATH" >> $GITHUB_ENV
 
       - name: Clone kernel source
         run: |
@@ -90,7 +83,7 @@ jobs:
 
       - name: Configure kernel (GKI + LXC/Docker)
         env:
-          PATH: ${{ env.TOOLCHAIN_PATH }}:/usr/bin:$PATH
+          PATH: ${{ env.CLANG_PATH }}:/usr/bin:$PATH
         run: |
           cd kernel
 
@@ -111,7 +104,7 @@ jobs:
 
       - name: Build kernel
         env:
-          PATH: ${{ env.TOOLCHAIN_PATH }}:/usr/bin:$PATH
+          PATH: ${{ env.CLANG_PATH }}:/usr/bin:$PATH
         run: |
           cd kernel
 
@@ -120,16 +113,18 @@ jobs:
           mkdir -p "$CCACHE_DIR"
           ccache -M 5G
 
-          export CC="ccache aarch64-linux-android-gcc"
+          export CC="ccache clang"
           export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
           export SUBARCH=arm64
+          export CLANG_TRIPLE=aarch64-linux-gnu-
 
           make O=../out \
             ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             -j$(nproc) \
             2>&1 | tee ../build.log
 
