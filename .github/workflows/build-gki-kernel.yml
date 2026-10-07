@@ -69,23 +69,22 @@ jobs:
 
           # Check toolchain structure
           echo "=== aarch64-linux-android-4.9 ==="
-          find aarch64-linux-android-4.9 -type f -name "*gcc*" | head -20
+          ls -la aarch64-linux-android-4.9/
           echo "=== arm-linux-androideabi-4.9 ==="
-          find arm-linux-androideabi-4.9 -type f -name "*gcc*" | head -20
-
-          # Find actual bin directories
-          AARCH64_BIN=$(find aarch64-linux-android-4.9 -type d -name "bin" | head -1)
-          ARM_BIN=$(find arm-linux-androideabi-4.9 -type d -name "bin" | head -1)
+          ls -la arm-linux-androideabi-4.9/
           
-          echo "AARCH64_BIN=$AARCH64_BIN"
-          echo "ARM_BIN=$ARM_BIN"
+          # Check if they use git lfs or have different structure
+          echo "=== aarch64-linux-android-4.9 git lfs files ==="
+          cd aarch64-linux-android-4.9 && git lfs ls-files 2>/dev/null | head -20 || echo "No git lfs"
+          cd ..
+          echo "=== arm-linux-androideabi-4.9 git lfs files ==="
+          cd arm-linux-androideabi-4.9 && git lfs ls-files 2>/dev/null | head -20 || echo "No git lfs"
+          cd ..
           
-          if [[ -n "$AARCH64_BIN" && -n "$ARM_BIN" ]]; then
-            echo "TOOLCHAIN_PATH=$PWD/$AARCH64_BIN:$PWD/$ARM_BIN" >> $GITHUB_ENV
-          else
-            echo "ERROR: Could not find toolchain bin directories"
-            exit 1
-          fi
+          # Try to find any binaries
+          echo "=== Searching for binaries ==="
+          find aarch64-linux-android-4.9 -type f \( -name "gcc" -o -name "g++" -o -name "ld" -o -name "as" \) 2>/dev/null | head -20
+          find arm-linux-androideabi-4.9 -type f \( -name "gcc" -o -name "g++" -o -name "ld" -o -name "as" \) 2>/dev/null | head -20
 
       - name: Clone kernel source
         run: |
