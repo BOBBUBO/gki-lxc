@@ -67,11 +67,25 @@ jobs:
             git clone --depth 1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9
           fi
 
-          # Verify toolchain binaries exist
-          ls -la aarch64-linux-android-4.9/bin/
-          ls -la arm-linux-androideabi-4.9/bin/
+          # Check toolchain structure
+          echo "=== aarch64-linux-android-4.9 ==="
+          find aarch64-linux-android-4.9 -type f -name "*gcc*" | head -20
+          echo "=== arm-linux-androideabi-4.9 ==="
+          find arm-linux-androideabi-4.9 -type f -name "*gcc*" | head -20
 
-          echo "TOOLCHAIN_PATH=$PWD/aarch64-linux-android-4.9/bin:$PWD/arm-linux-androideabi-4.9/bin" >> $GITHUB_ENV
+          # Find actual bin directories
+          AARCH64_BIN=$(find aarch64-linux-android-4.9 -type d -name "bin" | head -1)
+          ARM_BIN=$(find arm-linux-androideabi-4.9 -type d -name "bin" | head -1)
+          
+          echo "AARCH64_BIN=$AARCH64_BIN"
+          echo "ARM_BIN=$ARM_BIN"
+          
+          if [[ -n "$AARCH64_BIN" && -n "$ARM_BIN" ]]; then
+            echo "TOOLCHAIN_PATH=$PWD/$AARCH64_BIN:$PWD/$ARM_BIN" >> $GITHUB_ENV
+          else
+            echo "ERROR: Could not find toolchain bin directories"
+            exit 1
+          fi
 
       - name: Clone kernel source
         run: |
