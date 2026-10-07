@@ -67,6 +67,10 @@ jobs:
             git clone --depth 1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9
           fi
 
+          # Verify toolchain binaries exist
+          ls -la aarch64-linux-android-4.9/bin/
+          ls -la arm-linux-androideabi-4.9/bin/
+
           echo "TOOLCHAIN_PATH=$PWD/aarch64-linux-android-4.9/bin:$PWD/arm-linux-androideabi-4.9/bin" >> $GITHUB_ENV
 
       - name: Clone kernel source
