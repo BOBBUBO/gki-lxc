@@ -31,6 +31,10 @@ env:
   KERNEL_VERSION: ${{ github.event.inputs.kernel_branch || 'android-12-5.10' }}
   ENABLE_DEBUG: ${{ github.event.inputs.enable_debug || 'false' }}
 
+  # Default values for push/schedule triggers
+  DEFAULT_KERNEL_VERSION: android-12-5.10
+  DEFAULT_ENABLE_DEBUG: 'false'
+
 jobs:
   build:
     name: Build Kernel
@@ -71,7 +75,8 @@ jobs:
       
       - name: Clone kernel source
         run: |
-          git clone --depth 1 -b "${{ env.KERNEL_VERSION }}" \
+          BRANCH="${{ github.event.inputs.kernel_branch || env.DEFAULT_KERNEL_VERSION }}"
+          git clone --depth 1 -b "$BRANCH" \
             https://android.googlesource.com/kernel/common kernel
       
       - name: Configure kernel (GKI + LXC/Docker)
@@ -462,7 +467,8 @@ CONFIG_SYSTEM_EXTRA_CERTIFICATE=y
 EOF
           
           # Debug configs if enabled
-          if [[ "${{ env.ENABLE_DEBUG }}" == "true" ]]; then
+          DEBUG_FLAG="${{ github.event.inputs.enable_debug || env.DEFAULT_ENABLE_DEBUG }}"
+          if [[ "$DEBUG_FLAG" == "true" ]]; then
             cat >> ../out/.config << 'EOF'
 CONFIG_DEBUG_INFO=y
 CONFIG_DEBUG_INFO_DWARF4=y
@@ -539,7 +545,7 @@ EOF
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gki-kernel-${{ env.KERNEL_VERSION }}-lxc-docker
+          name: gki-kernel-${{ github.event.inputs.kernel_branch || env.DEFAULT_KERNEL_VERSION }}-lxc-docker
           path: |
             out/dist/**
             build.log
@@ -549,17 +555,19 @@ EOF
         uses: actions/cache@v4
         with:
           path: ccache
-          key: ccache-${{ runner.os }}-${{ env.KERNEL_VERSION }}
+          key: ccache-${{ runner.os }}-${{ github.event.inputs.kernel_branch || env.DEFAULT_KERNEL_VERSION }}
           restore-keys: |
-            ccache-${{ runner.os }}-${{ env.KERNEL_VERSION }}
+            ccache-${{ runner.os }}-${{ github.event.inputs.kernel_branch || env.DEFAULT_KERNEL_VERSION }}
             ccache-${{ runner.os }}-
       
       - name: Build summary
         if: always()
         run: |
+          BRANCH="${{ github.event.inputs.kernel_branch || env.DEFAULT_KERNEL_VERSION }}"
+          DEBUG_FLAG="${{ github.event.inputs.enable_debug || env.DEFAULT_ENABLE_DEBUG }}"
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Kernel Version**: ${{ env.KERNEL_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Debug Enabled**: ${{ env.ENABLE_DEBUG }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Kernel Version**: $BRANCH" >> $GITHUB_STEP_SUMMARY
+          echo "- **Debug Enabled**: $DEBUG_FLAG" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           if [[ -f out/dist/Image ]]; then
             echo "- **Kernel Image**: ✅ Built" >> $GITHUB_STEP_SUMMARY
