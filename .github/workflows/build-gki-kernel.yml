@@ -77,7 +77,7 @@ jobs:
 
       - name: Configure kernel (GKI + LXC/Docker)
         env:
-          PATH: ${{ env.TOOLCHAIN_PATH }}:$PATH
+          PATH: ${{ env.TOOLCHAIN_PATH }}:/usr/bin:$PATH
         run: |
           cd kernel
 
@@ -98,7 +98,7 @@ jobs:
 
       - name: Build kernel
         env:
-          PATH: ${{ env.TOOLCHAIN_PATH }}:$PATH
+          PATH: ${{ env.TOOLCHAIN_PATH }}:/usr/bin:$PATH
         run: |
           cd kernel
 
