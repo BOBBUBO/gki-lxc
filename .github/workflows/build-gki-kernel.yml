@@ -6,10 +6,10 @@ on:
       kernel_branch:
         description: 'Kernel branch to build'
         required: true
-        default: 'android-12-5.10'
+        default: 'android12-5.10'
         type: choice
         options:
-          - android-12-5.10
+          - android12-5.10
           - android13-5.15
           - android14-6.1
       enable_debug:
@@ -29,7 +29,7 @@ on:
     - cron: '0 2 * * 0'
 
 env:
-  DEFAULT_KERNEL_VERSION: android-12-5.10
+  DEFAULT_KERNEL_VERSION: android12-5.10
   DEFAULT_ENABLE_DEBUG: 'false'
 
 jobs:
