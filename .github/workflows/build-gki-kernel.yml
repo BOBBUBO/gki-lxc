@@ -56,35 +56,31 @@ jobs:
 
       - name: Set up toolchain
         run: |
+          sudo apt-get install -y git-lfs
+          git lfs install
+
           mkdir -p toolchain
           cd toolchain
 
           if [[ ! -d "aarch64-linux-android-4.9" ]]; then
-            git clone --depth 1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
+            git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
+            cd aarch64-linux-android-4.9
+            git lfs pull
+            cd ..
           fi
 
           if [[ ! -d "arm-linux-androideabi-4.9" ]]; then
-            git clone --depth 1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9
+            git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9
+            cd arm-linux-androideabi-4.9
+            git lfs pull
+            cd ..
           fi
 
-          # Check toolchain structure
-          echo "=== aarch64-linux-android-4.9 ==="
-          ls -la aarch64-linux-android-4.9/
-          echo "=== arm-linux-androideabi-4.9 ==="
-          ls -la arm-linux-androideabi-4.9/
-          
-          # Check if they use git lfs or have different structure
-          echo "=== aarch64-linux-android-4.9 git lfs files ==="
-          cd aarch64-linux-android-4.9 && git lfs ls-files 2>/dev/null | head -20 || echo "No git lfs"
-          cd ..
-          echo "=== arm-linux-androideabi-4.9 git lfs files ==="
-          cd arm-linux-androideabi-4.9 && git lfs ls-files 2>/dev/null | head -20 || echo "No git lfs"
-          cd ..
-          
-          # Try to find any binaries
-          echo "=== Searching for binaries ==="
-          find aarch64-linux-android-4.9 -type f \( -name "gcc" -o -name "g++" -o -name "ld" -o -name "as" \) 2>/dev/null | head -20
-          find arm-linux-androideabi-4.9 -type f \( -name "gcc" -o -name "g++" -o -name "ld" -o -name "as" \) 2>/dev/null | head -20
+          # Verify toolchain binaries exist
+          ls -la aarch64-linux-android-4.9/bin/
+          ls -la arm-linux-androideabi-4.9/bin/
+
+          echo "TOOLCHAIN_PATH=$PWD/aarch64-linux-android-4.9/bin:$PWD/arm-linux-androideabi-4.9/bin" >> $GITHUB_ENV
 
       - name: Clone kernel source
         run: |
