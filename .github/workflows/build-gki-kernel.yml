@@ -1,0 +1,572 @@
+name: Build GKI Kernel (android-12-5.10) with LXC/Docker Support
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: 'Kernel branch to build'
+        required: true
+        default: 'android-12-5.10'
+        type: choice
+        options:
+          - android-12-5.10
+          - android13-5.15
+          - android14-6.1
+      enable_debug:
+        description: 'Enable debug configs'
+        required: false
+        default: false
+        type: boolean
+
+  push:
+    branches: [main, master]
+    paths:
+      - 'build_gki_kernel.sh'
+      - '.github/workflows/build-gki-kernel.yml'
+
+  schedule:
+    - cron: '0 2 * * 0'
+
+env:
+  KERNEL_VERSION: ${{ github.event.inputs.kernel_branch || 'android-12-5.10' }}
+  ENABLE_DEBUG: ${{ github.event.inputs.enable_debug || 'false' }}
+
+jobs:
+  build:
+    name: Build Kernel
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git build-essential libssl-dev libncurses5-dev \
+            bison flex libelf-dev bc cpio rsync \
+            python3 python3-pip python3-setuptools \
+            device-tree-compiler lz4 lzop \
+            ccache pigz qemu-user-static
+      
+      - name: Set up toolchain
+        run: |
+          mkdir -p toolchain
+          cd toolchain
+          
+          if [[ ! -d "aarch64-linux-android-4.9" ]]; then
+            git clone --depth 1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9
+          fi
+          
+          if [[ ! -d "arm-linux-androideabi-4.9" ]]; then
+            git clone --depth 1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9
+          fi
+          
+          echo "$PWD/aarch64-linux-android-4.9/bin" >> $GITHUB_PATH
+          echo "$PWD/arm-linux-androideabi-4.9/bin" >> $GITHUB_PATH
+      
+      - name: Clone kernel source
+        run: |
+          git clone --depth 1 -b "${{ env.KERNEL_VERSION }}" \
+            https://android.googlesource.com/kernel/common kernel
+      
+      - name: Configure kernel (GKI + LXC/Docker)
+        run: |
+          cd kernel
+          
+          # Base GKI config
+          make O=../out gki_defconfig
+          
+          # LXC/Docker required configs
+          cat >> ../out/.config << 'EOF'
+# Namespaces
+CONFIG_NAMESPACES=y
+CONFIG_UTS_NS=y
+CONFIG_IPC_NS=y
+CONFIG_PID_NS=y
+CONFIG_NET_NS=y
+CONFIG_USER_NS=y
+CONFIG_CGROUPS=y
+
+# Cgroups
+CONFIG_CGROUP_DEVICE=y
+CONFIG_CGROUP_SCHED=y
+CONFIG_CGROUP_CPUACCT=y
+CONFIG_CGROUP_PIDS=y
+CONFIG_CGROUP_FREEZER=y
+CONFIG_CPUSETS=y
+CONFIG_MEMCG=y
+CONFIG_MEMCG_SWAP=y
+CONFIG_MEMCG_SWAP_ENABLED=y
+CONFIG_BLK_CGROUP=y
+CONFIG_CGROUP_BPF=y
+CONFIG_CGROUP_PERF=y
+
+# Network - Netfilter
+CONFIG_NETFILTER=y
+CONFIG_NETFILTER_ADVANCED=y
+CONFIG_NETFILTER_INGRESS=y
+CONFIG_NETFILTER_NETLINK=y
+CONFIG_NETFILTER_NETLINK_ACCT=y
+CONFIG_NETFILTER_NETLINK_QUEUE=y
+CONFIG_NETFILTER_NETLINK_LOG=y
+CONFIG_NETFILTER_XTABLES=y
+
+# Netfilter matches
+CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+CONFIG_NETFILTER_XT_MATCH_COMMENT=y
+CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y
+CONFIG_NETFILTER_XT_MATCH_LIMIT=y
+CONFIG_NETFILTER_XT_MATCH_MAC=y
+CONFIG_NETFILTER_XT_MATCH_MARK=y
+CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y
+CONFIG_NETFILTER_XT_MATCH_OWNER=y
+CONFIG_NETFILTER_XT_MATCH_POLICY=y
+CONFIG_NETFILTER_XT_MATCH_PKTTYPE=y
+CONFIG_NETFILTER_XT_MATCH_QUOTA=y
+CONFIG_NETFILTER_XT_MATCH_RATEEST=y
+CONFIG_NETFILTER_XT_MATCH_REALM=y
+CONFIG_NETFILTER_XT_MATCH_RECENT=y
+CONFIG_NETFILTER_XT_MATCH_SCTP=y
+CONFIG_NETFILTER_XT_MATCH_SOCKET=y
+CONFIG_NETFILTER_XT_MATCH_STATE=y
+CONFIG_NETFILTER_XT_MATCH_STATISTIC=y
+CONFIG_NETFILTER_XT_MATCH_STRING=y
+CONFIG_NETFILTER_XT_MATCH_TCPMSS=y
+CONFIG_NETFILTER_XT_MATCH_TIME=y
+CONFIG_NETFILTER_XT_MATCH_U32=y
+
+# NAT
+CONFIG_NF_NAT=y
+CONFIG_NF_NAT_IPV4=y
+CONFIG_NF_NAT_IPV6=y
+CONFIG_NF_NAT_MASQUERADE_IPV4=y
+CONFIG_NF_NAT_MASQUERADE_IPV6=y
+CONFIG_NF_NAT_PROTO_DCCP=y
+CONFIG_NF_NAT_PROTO_GRE=y
+CONFIG_NF_NAT_PROTO_SCTP=y
+CONFIG_NF_NAT_PROTO_UDPLITE=y
+CONFIG_NF_NAT_FTP=y
+CONFIG_NF_NAT_IRC=y
+CONFIG_NF_NAT_SIP=y
+CONFIG_NF_NAT_TFTP=y
+CONFIG_NF_NAT_AMANDA=y
+
+# Connection tracking
+CONFIG_NF_CONNTRACK=y
+CONFIG_NF_LOG_COMMON=y
+CONFIG_NF_LOG_NETDEV=y
+CONFIG_NF_CONNTRACK_MARK=y
+CONFIG_NF_CONNTRACK_SECMARK=y
+CONFIG_NF_CONNTRACK_ZONES=y
+CONFIG_NF_CONNTRACK_PROCFS=y
+CONFIG_NF_CONNTRACK_EVENTS=y
+CONFIG_NF_CONNTRACK_TIMEOUT=y
+CONFIG_NF_CONNTRACK_TIMESTAMP=y
+CONFIG_NF_CONNTRACK_LABELS=y
+CONFIG_NF_CT_PROTO_DCCP=y
+CONFIG_NF_CT_PROTO_GRE=y
+CONFIG_NF_CT_PROTO_SCTP=y
+CONFIG_NF_CT_PROTO_UDPLITE=y
+CONFIG_NF_CT_NETLINK=y
+CONFIG_NF_CT_NETLINK_TIMEOUT=y
+CONFIG_NF_CT_NETLINK_HELPER=y
+CONFIG_NETFILTER_XT_TARGET_CONNTRACK=y
+CONFIG_NETFILTER_XT_TARGET_CT=y
+CONFIG_NETFILTER_XT_TARGET_NOTRACK=y
+
+# IPVS
+CONFIG_IP_VS=y
+CONFIG_IP_VS_IPV6=y
+CONFIG_IP_VS_PROTO_TCP=y
+CONFIG_IP_VS_PROTO_UDP=y
+CONFIG_IP_VS_PROTO_AH_ESP=y
+CONFIG_IP_VS_PROTO_ESP=y
+CONFIG_IP_VS_PROTO_AH=y
+CONFIG_IP_VS_PROTO_SCTP=y
+CONFIG_IP_VS_RR=y
+CONFIG_IP_VS_WRR=y
+CONFIG_IP_VS_LC=y
+CONFIG_IP_VS_WLC=y
+CONFIG_IP_VS_FO=y
+CONFIG_IP_VS_OVF=y
+CONFIG_IP_VS_LBLC=y
+CONFIG_IP_VS_LBLCR=y
+CONFIG_IP_VS_DH=y
+CONFIG_IP_VS_SH=y
+CONFIG_IP_VS_MH=y
+CONFIG_IP_VS_SED=y
+CONFIG_IP_VS_NQ=y
+CONFIG_IP_VS_FTP=y
+CONFIG_IP_VS_NFCT=y
+CONFIG_IP_VS_PE_SIP=y
+
+# Bridge
+CONFIG_BRIDGE=y
+CONFIG_BRIDGE_IGMP_SNOOPING=y
+CONFIG_BRIDGE_VLAN_FILTERING=y
+CONFIG_BRIDGE_NETFILTER=y
+CONFIG_BRIDGE_NF_EBTABLES=y
+CONFIG_EBTABLES=y
+CONFIG_EBT_BROUTE=y
+CONFIG_EBT_T_FILTER=y
+CONFIG_EBT_T_NAT=y
+CONFIG_EBT_802_3=y
+CONFIG_EBT_AMONG=y
+CONFIG_EBT_ARP=y
+CONFIG_EBT_IP=y
+CONFIG_EBT_IP6=y
+CONFIG_EBT_LIMIT=y
+CONFIG_EBT_MARK=y
+CONFIG_EBT_MARK_T=y
+CONFIG_EBT_NFLOG=y
+CONFIG_EBT_PKTTYPE=y
+CONFIG_EBT_STP=y
+CONFIG_EBT_VLAN=y
+CONFIG_EBT_ARPREPLY=y
+
+# VLAN
+CONFIG_VLAN_8021Q=y
+CONFIG_VLAN_8021Q_GVRP=y
+CONFIG_VLAN_8021Q_MVRP=y
+
+# Network scheduling
+CONFIG_NET_SCHED=y
+CONFIG_NET_SCH_CBQ=y
+CONFIG_NET_SCH_HTB=y
+CONFIG_NET_SCH_HFSC=y
+CONFIG_NET_SCH_PRIO=y
+CONFIG_NET_SCH_MULTIQ=y
+CONFIG_NET_SCH_RED=y
+CONFIG_NET_SCH_SFB=y
+CONFIG_NET_SCH_SFQ=y
+CONFIG_NET_SCH_TEQL=y
+CONFIG_NET_SCH_TBF=y
+CONFIG_NET_SCH_GRED=y
+CONFIG_NET_SCH_DSMARK=y
+CONFIG_NET_SCH_NETEM=y
+CONFIG_NET_SCH_DRR=y
+CONFIG_NET_SCH_MQPRIO=y
+CONFIG_NET_SCH_CHOKE=y
+CONFIG_NET_SCH_QFQ=y
+CONFIG_NET_SCH_CODEL=y
+CONFIG_NET_SCH_FQ_CODEL=y
+CONFIG_NET_SCH_FQ=y
+CONFIG_NET_SCH_HHF=y
+CONFIG_NET_SCH_PIE=y
+CONFIG_NET_SCH_INGRESS=y
+CONFIG_NET_SCH_PLUG=y
+CONFIG_NET_SCH_DEFAULT=y
+CONFIG_DEFAULT_FQ_CODEL=y
+
+# Classification
+CONFIG_NET_CLS=y
+CONFIG_NET_CLS_BASIC=y
+CONFIG_NET_CLS_TCINDEX=y
+CONFIG_NET_CLS_ROUTE4=y
+CONFIG_NET_CLS_FW=y
+CONFIG_NET_CLS_U32=y
+CONFIG_NET_CLS_RSVP=y
+CONFIG_NET_CLS_RSVP6=y
+CONFIG_NET_CLS_FLOW=y
+CONFIG_NET_CLS_CGROUP=y
+CONFIG_NET_CLS_BPF=y
+CONFIG_NET_CLS_FLOWER=y
+CONFIG_NET_CLS_MATCHALL=y
+CONFIG_NET_EMATCH=y
+CONFIG_NET_EMATCH_STACK=32
+CONFIG_NET_EMATCH_CMP=y
+CONFIG_NET_EMATCH_NBYTE=y
+CONFIG_NET_EMATCH_U32=y
+CONFIG_NET_EMATCH_META=y
+CONFIG_NET_EMATCH_TEXT=y
+CONFIG_NET_EMATCH_CANID=y
+CONFIG_NET_EMATCH_IPSET=y
+CONFIG_NET_EMATCH_IPVT=y
+
+# Actions
+CONFIG_NET_ACT_POLICE=y
+CONFIG_NET_ACT_GACT=y
+CONFIG_GACT_PROB=y
+CONFIG_NET_ACT_MIRRED=y
+CONFIG_NET_ACT_SAMPLE=y
+CONFIG_NET_ACT_IPT=y
+CONFIG_NET_ACT_NAT=y
+CONFIG_NET_ACT_PEDIT=y
+CONFIG_NET_ACT_SIMP=y
+CONFIG_NET_ACT_SKBEDIT=y
+CONFIG_NET_ACT_CSUM=y
+CONFIG_NET_ACT_MPLS=y
+CONFIG_NET_ACT_VLAN=y
+CONFIG_NET_ACT_BPF=y
+CONFIG_NET_ACT_CONNMARK=y
+CONFIG_NET_ACT_CTINFO=y
+CONFIG_NET_ACT_SKBMOD=y
+CONFIG_NET_ACT_IFE=y
+CONFIG_NET_ACT_TUNNEL_KEY=y
+CONFIG_NET_ACT_CT=y
+CONFIG_NET_ACT_GATE=y
+
+# Virtual networking
+CONFIG_TUN=y
+CONFIG_VETH=y
+CONFIG_MACVLAN=y
+CONFIG_MACVTAP=y
+CONFIG_IPVLAN=y
+CONFIG_IPVTAP=y
+CONFIG_NET_FOU=y
+CONFIG_NET_FOU_IP_TUNNELS=y
+CONFIG_NET_GENEVE=y
+CONFIG_NET_GTP=y
+CONFIG_NET_MPLS_GSO=y
+CONFIG_NET_NSH=y
+CONFIG_NET_VRF=y
+CONFIG_NET_VRF_DEV=y
+
+# Checkpoint/Restore
+CONFIG_CHECKPOINT_RESTORE=y
+
+# OverlayFS
+CONFIG_OVERLAY_FS=y
+CONFIG_OVERLAY_FS_REDIRECT_DIR=y
+CONFIG_OVERLAY_FS_REDIRECT_ALWAYS_FOLLOW=y
+CONFIG_OVERLAY_FS_INDEX=y
+CONFIG_OVERLAY_FS_XINO_AUTO=y
+CONFIG_OVERLAY_FS_METACOPY=y
+
+# Filesystems
+CONFIG_FS_POSIX_ACL=y
+CONFIG_FSNOTIFY=y
+CONFIG_DNOTIFY=y
+CONFIG_INOTIFY_USER=y
+CONFIG_FANOTIFY=y
+CONFIG_FANOTIFY_ACCESS_PERMISSIONS=y
+CONFIG_QUOTA=y
+CONFIG_QUOTA_NETLINK_INTERFACE=y
+CONFIG_QUOTACTL=y
+CONFIG_AUTOFS4_FS=y
+CONFIG_FUSE_FS=y
+CONFIG_CUSE=y
+CONFIG_VIRTIO_FS=y
+
+# Security
+CONFIG_SECURITY=y
+CONFIG_SECURITY_NETWORK=y
+CONFIG_SECURITY_PATH=y
+CONFIG_SECURITY_SELINUX=y
+CONFIG_SECURITY_SELINUX_BOOTPARAM=y
+CONFIG_SECURITY_SELINUX_DEVELOP=y
+CONFIG_SECURITY_SELINUX_AVC_STATS=y
+CONFIG_SECURITY_SELINUX_CHECKREQPROT_VALUE=1
+CONFIG_SECURITY_SMACK=y
+CONFIG_SECURITY_TOMOYO=y
+CONFIG_SECURITY_APPARMOR=y
+CONFIG_SECURITY_APPARMOR_HASH=y
+CONFIG_SECURITY_APPARMOR_HASH_DEFAULT=y
+CONFIG_SECURITY_YAMA=y
+CONFIG_SECURITY_SAFESETID=y
+CONFIG_SECURITY_LOCKDOWN_LSM=y
+CONFIG_LSM_MMAP_MIN_ADDR=65536
+CONFIG_HAVE_HARDENED_USERCOPY_ALLOCATOR=y
+CONFIG_HARDENED_USERCOPY=y
+CONFIG_HARDENED_USERCOPY_FALLBACK=y
+CONFIG_FORTIFY_SOURCE=y
+
+# Keys
+CONFIG_KEYS=y
+CONFIG_KEYS_REQUEST_CACHE=y
+CONFIG_PERSISTENT_KEYRINGS=y
+CONFIG_BIG_KEYS=y
+CONFIG_TRUSTED_KEYS=y
+CONFIG_ENCRYPTED_KEYS=y
+CONFIG_KEY_DH_OPERATIONS=y
+
+# BPF
+CONFIG_BPF=y
+CONFIG_BPF_SYSCALL=y
+CONFIG_BPF_JIT=y
+CONFIG_BPF_JIT_ALWAYS_ON=y
+CONFIG_BPF_LSM=y
+CONFIG_BPF_PRELOAD=y
+CONFIG_BPF_PRELOAD_UMD=y
+CONFIG_HAVE_EBPF_JIT=y
+
+# Seccomp
+CONFIG_SECCOMP=y
+CONFIG_SECCOMP_FILTER=y
+
+# Device drivers
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_STANDALONE=y
+CONFIG_PREVENT_FIRMWARE_BUILD=y
+
+# Block devices
+CONFIG_BLK_DEV_LOOP=y
+CONFIG_BLK_DEV_LOOP_MIN_COUNT=8
+CONFIG_BLK_DEV_NBD=y
+CONFIG_BLK_DEV_RAM=y
+CONFIG_BLK_DEV_RAM_COUNT=16
+CONFIG_BLK_DEV_RAM_SIZE=16384
+
+# Android
+CONFIG_ANDROID=y
+CONFIG_ANDROID_BINDER_IPC=y
+CONFIG_ANDROID_BINDERFS=y
+CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"
+CONFIG_ANDROID_BINDER_IPC_SELFTEST=y
+CONFIG_ANDROID_LOGGER=y
+CONFIG_ANDROID_TIMED_OUTPUT=y
+CONFIG_ANDROID_TIMED_GPIO=y
+CONFIG_ANDROID_LOW_MEMORY_KILLER=y
+CONFIG_ANDROID_LOW_MEMORY_KILLER_AUTODETECT_OOM_ADJ_VALUES=y
+
+# IPC
+CONFIG_SYSVIPC=y
+CONFIG_SYSVIPC_SYSCTL=y
+CONFIG_POSIX_MQUEUE=y
+CONFIG_POSIX_MQUEUE_SYSCTL=y
+CONFIG_CROSS_MEMORY_ATTACH=y
+CONFIG_HAVE_ARCH_SECCOMP_FILTER=y
+CONFIG_SECCOMP_FILTER=y
+
+# Audit
+CONFIG_AUDIT=y
+CONFIG_AUDITSYSCALL=y
+CONFIG_AUDIT_WATCH=y
+CONFIG_AUDIT_TREE=y
+
+# Kprobes
+CONFIG_KPROBES=y
+CONFIG_KRETPROBES=y
+CONFIG_UPROBES=y
+CONFIG_HAVE_KPROBES=y
+CONFIG_HAVE_KRETPROBES=y
+CONFIG_HAVE_UPROBES=y
+
+# Modules
+CONFIG_MODULES=y
+CONFIG_MODULE_UNLOAD=y
+CONFIG_MODVERSIONS=y
+CONFIG_MODULE_SRCVERSION_ALL=y
+CONFIG_MODULE_SIG=y
+CONFIG_MODULE_SIG_ALL=y
+CONFIG_MODULE_SIG_SHA512=y
+CONFIG_MODULE_SIG_KEY="certs/signing_key.pem"
+CONFIG_SYSTEM_TRUSTED_KEYRING=y
+CONFIG_SYSTEM_EXTRA_CERTIFICATE=y
+EOF
+          
+          # Debug configs if enabled
+          if [[ "${{ env.ENABLE_DEBUG }}" == "true" ]]; then
+            cat >> ../out/.config << 'EOF'
+CONFIG_DEBUG_INFO=y
+CONFIG_DEBUG_INFO_DWARF4=y
+CONFIG_DEBUG_INFO_BTF=y
+CONFIG_DEBUG_KERNEL=y
+CONFIG_DEBUG_FS=y
+CONFIG_DEBUG_KMEMLEAK=y
+CONFIG_DEBUG_STACK_USAGE=y
+CONFIG_DEBUG_VM=y
+CONFIG_DEBUG_VIRTUAL=y
+CONFIG_DEBUG_MEMORY_INIT=y
+CONFIG_DEBUG_PER_CPU_MAPS=y
+CONFIG_DEBUG_HIGHMEM=y
+CONFIG_PROVE_LOCKING=y
+CONFIG_LOCK_STAT=y
+CONFIG_DEBUG_RT_MUTEXES=y
+CONFIG_DEBUG_SPINLOCK=y
+CONFIG_DEBUG_MUTEXES=y
+CONFIG_DEBUG_RWSEMS=y
+CONFIG_DEBUG_LOCK_ALLOC=y
+CONFIG_DEBUG_ATOMIC_SLEEP=y
+CONFIG_DEBUG_LOCKDEP=y
+CONFIG_DEBUG_SLAB=y
+CONFIG_SLUB_DEBUG_ON=y
+CONFIG_SLUB_STATS=y
+EOF
+          fi
+          
+          # Resolve dependencies
+          make O=../out olddefconfig
+      
+      - name: Build kernel
+        run: |
+          cd kernel
+          
+          # Set up ccache
+          export CCACHE_DIR="${{ github.workspace }}/ccache"
+          mkdir -p "$CCACHE_DIR"
+          ccache -M 5G
+          
+          export CC="ccache aarch64-linux-android-gcc"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export SUBARCH=arm64
+          
+          make O=../out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            -j$(nproc) \
+            2>&1 | tee ../build.log
+      
+      - name: Package kernel artifacts
+        run: |
+          mkdir -p out/dist
+          
+          # Copy Image
+          find out -name "Image" -exec cp {} out/dist/ \;
+          
+          # Copy DTBs
+          find out -name "*.dtb" -exec cp {} out/dist/ \;
+          
+          # Copy modules
+          find out -name "*.ko" -exec cp {} out/dist/ \;
+          
+          # Create kernel version file
+          if [[ -f out/.config ]]; then
+            grep "CONFIG_LOCALVERSION=" out/.config | cut -d'"' -f2 > out/dist/kernel_version.txt || echo "unknown" > out/dist/kernel_version.txt
+          fi
+          
+          ls -la out/dist/
+      
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gki-kernel-${{ env.KERNEL_VERSION }}-lxc-docker
+          path: |
+            out/dist/**
+            build.log
+          retention-days: 30
+      
+      - name: Upload ccache
+        uses: actions/cache@v4
+        with:
+          path: ccache
+          key: ccache-${{ runner.os }}-${{ env.KERNEL_VERSION }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ env.KERNEL_VERSION }}
+            ccache-${{ runner.os }}-
+      
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Kernel Version**: ${{ env.KERNEL_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Debug Enabled**: ${{ env.ENABLE_DEBUG }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          if [[ -f out/dist/Image ]]; then
+            echo "- **Kernel Image**: ✅ Built" >> $GITHUB_STEP_SUMMARY
+            ls -lh out/dist/Image >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Kernel Image**: ❌ Not found" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### LXC/Docker Support" >> $GITHUB_STEP_SUMMARY
+          echo "All required kernel configs for LXC/Docker have been enabled." >> $GITHUB_STEP_SUMMARY
